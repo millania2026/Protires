@@ -1,46 +1,44 @@
-app = "protires"
-primary_region = "mia"
+# fly.toml app configuration file generated for protires on 2026-11-18T00:42:51Z
+#
+# See https://docs.fly.io/reference/configuration for information about how to use this file.
+#
+
+app = 'protires'
+primary_region = 'ams'
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
 
 [env]
-  NODE_ENV = "production"
-  PORT = "8080"
-  DATABASE_URL = "file:/data/protires.db"
-  DATABASE_BACKUP_DIR = "/data/backups"
-  PUBLIC_UPLOAD_DIR = "/data/uploads"
-  TRUST_PROXY_HOPS = "1"
-  APPOINTMENT_CAPACITY = "1"
+  APPOINTMENT_CAPACITY = '1'
+  DATABASE_BACKUP_DIR = '/data/backups'
+  DATABASE_URL = 'file:/data/protires.db'
+  NODE_ENV = 'production'
+  PORT = '8080'
+  PUBLIC_UPLOAD_DIR = '/data/uploads'
+  TRUST_PROXY_HOPS = '1'
 
 [[mounts]]
-  source = "protires_data"
-  destination = "/data"
-  initial_size = "1gb"
+  source = 'protires_data'
+  destination = '/data'
+  initial_size = '1gb'
 
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = "off"
+  auto_stop_machines = 'off'
   auto_start_machines = true
   min_machines_running = 1
 
   [[http_service.checks]]
-    method = "GET"
-    path = "/api/health"
-    interval = "30s"
-    timeout = "5s"
-    grace_period = "20s"
-
-  [[http_service.ports]]
-    handlers = ["http"]
-    port = 80
-
-  [[http_service.ports]]
-    handlers = ["tls", "http"]
-    port = 443
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '20s'
+    method = 'GET'
+    path = '/api/health'
 
 [[vm]]
-  memory = "512mb"
-  cpu_kind = "shared"
+  memory = '512mb'
+  cpu_kind = 'shared'
   cpus = 1
+  memory_mb = 256
