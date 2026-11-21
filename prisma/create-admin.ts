@@ -7,8 +7,10 @@ if (!process.env.DATABASE_URL) throw new Error('Configura DATABASE_URL antes de 
 const email = process.env.ADMIN_EMAIL?.trim().toLowerCase() || '';
 const password = process.env.ADMIN_PASSWORD || '';
 if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('ADMIN_EMAIL debe ser un correo válido.');
-if (password.length < 14 || password.length > 72) throw new Error('ADMIN_PASSWORD debe tener entre 14 y 72 caracteres.');
-if (['admin@protires.local', 'demo@protires.local'].includes(email)) throw new Error('No uses una dirección demo para el administrador.');
+if (password.length < 14 || password.length > 72)
+  throw new Error('ADMIN_PASSWORD debe tener entre 14 y 72 caracteres.');
+if (['admin@protires.local', 'demo@protires.local'].includes(email))
+  throw new Error('No uses una dirección demo para el administrador.');
 
 const db = new PrismaClient();
 try {
