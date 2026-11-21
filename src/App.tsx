@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import AdminPanel from './AdminPanel';
+import BookingFields from './BookingFields';
 import VehicleCatalogFields from './VehicleCatalogFields';
+import { apiFetch, errorText, SessionExpiredError } from './api';
+import { dayNumber, money, monthShort, priceLabel, STATUS_LABEL, timeLabel } from './format';
 import {
-  Wrench,
   ArrowUpRight,
   Car,
   Clock,
@@ -13,11 +15,12 @@ import {
   Check,
   Disc3,
   CalendarDays,
-  Settings2,
+  KeyRound,
   LogOut,
   UserRound,
   ChevronRight,
 } from 'lucide-react';
+
 type S = {
   id: string;
   name: string;
@@ -51,11 +54,12 @@ type A = {
   service: S;
 };
 type Profile = { name: string; email: string; role?: string };
-const money = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n / 100);
-const caracasNow = () =>
-  new Date().toLocaleString('sv-SE', { timeZone: 'America/Caracas' }).replace(' ', 'T').slice(0, 16);
+type Session = { token: string; user: Profile & { role: string } };
+
+const SHOP_PHONE = '0424-1091552';
+
 const serviceArt = (service: S) => {
-  if (service.imageUrl?.startsWith('/uploads/')) return service.imageUrl;
+  if (service.imageUrl) return service.imageUrl; // la API sólo entrega URLs propias del taller
   const name = service.name.toLocaleLowerCase('es');
   if (name.includes('diagnóstico') || name.includes('escáner')) return '/images/service-diagnosis.jpeg';
   if (name.includes('aceite') || name.includes('filtro') || name.includes('inyector'))
@@ -68,87 +72,9 @@ const serviceArt = (service: S) => {
     name.includes('blindaje')
   )
     return '/images/service-alignment.jpeg';
-  return '/images/workshop-armada.png';
+  return '/images/workshop-armada.webp';
 };
-const publicServiceFallback: S[] = [
-  {
-    id: 'offline-align',
-    name: 'Alineación',
-    description: 'Alineación de ruedas para estabilidad y desgaste uniforme.',
-    category: 'Cauchera',
-    priceCents: 0,
-  },
-  {
-    id: 'offline-static',
-    name: 'Balanceo estático',
-    description: 'Balanceo estático de ruedas.',
-    category: 'Cauchera',
-    priceCents: 0,
-  },
-  {
-    id: 'offline-dynamic',
-    name: 'Balanceo dinámico',
-    description: 'Balanceo dinámico para corregir vibraciones al conducir.',
-    category: 'Cauchera',
-    priceCents: 0,
-  },
-  {
-    id: 'offline-tire-repair',
-    name: 'Reparación de cauchos',
-    description: 'Inspección y reparación de cauchos según el daño.',
-    category: 'Cauchera',
-    priceCents: 0,
-  },
-  {
-    id: 'offline-runflat',
-    name: 'Instalación de sistemas de blindaje para cauchos',
-    description: 'Instalación de sistemas de blindaje para cauchos.',
-    category: 'Cauchera',
-    priceCents: 0,
-  },
-  {
-    id: 'offline-tpms',
-    name: 'Sensores TPMS',
-    description: 'Servicio de sensores para monitoreo de presión de cauchos.',
-    category: 'Cauchera',
-    priceCents: 0,
-  },
-  {
-    id: 'offline-light-mechanic',
-    name: 'Mecánica ligera (tren delantero y trasero)',
-    description: 'Revisión y atención de mecánica ligera en tren delantero y trasero.',
-    category: 'Mecánica',
-    priceCents: 0,
-  },
-  {
-    id: 'offline-brakes',
-    name: 'Frenos',
-    description: 'Revisión y servicio del sistema de frenos.',
-    category: 'Mecánica',
-    priceCents: 0,
-  },
-  {
-    id: 'offline-scanner',
-    name: 'Servicio de escáner y entonación',
-    description: 'Diagnóstico electrónico con escáner y entonación.',
-    category: 'Mecánica',
-    priceCents: 0,
-  },
-  {
-    id: 'offline-injectors',
-    name: 'Limpieza de inyectores',
-    description: 'Limpieza del sistema de inyección.',
-    category: 'Mecánica',
-    priceCents: 0,
-  },
-  {
-    id: 'offline-discs',
-    name: 'Rectificación de discos de freno',
-    description: 'Evaluación y rectificación de discos de freno.',
-    category: 'Mecánica',
-    priceCents: 0,
-  },
-];
+
 export default function App() {
   const [token, T] = useState(localStorage.getItem('token') || ''),
     [services, S] = useState<S[]>([]),
@@ -156,125 +82,115 @@ export default function App() {
     [items, I] = useState<I[]>([]),
     [appointments, AP] = useState<A[]>([]),
     [profile, PR] = useState<Profile | null>(null),
-    [demoMode, SD] = useState(false),
-    [adminMode, SAM] = useState(false),
     [view, SV] = useState(
       localStorage.getItem('role') === 'ADMIN' ? 'admin' : localStorage.getItem('token') ? 'dashboard' : 'home',
     ),
     [selected, Q] = useState(''),
     [query, U] = useState(''),
+    [debouncedQuery, setDebouncedQuery] = useState(''),
     [bookingService, BS] = useState(''),
     [modal, M] = useState(''),
-    [notice, N] = useState('');
-  const headers: Record<string, string> = {
-    ...(token ? { Authorization: 'Bearer ' + token } : {}),
-    'Content-Type': 'application/json',
-  };
-  useEffect(() => {
-    if (demoMode) {
-      const v: V = {
-          id: 'demo-vehicle',
-          make: 'Nissan',
-          model: 'Armada',
-          year: 2024,
-          plate: 'DEMO-01',
-          engine: '3.5L V6',
-          tireSize: '275/50 R22',
-        },
-        s: S = {
-          id: 'demo-service',
-          name: 'Alineación y balanceo',
-          description: 'Alineación y balanceo',
-          category: 'Cauchera',
-          priceCents: 3918,
-        },
-        a: A = {
-          id: 'demo-appointment',
-          startsAt: new Date(Date.now() + 172800000).toISOString(),
-          status: 'CONFIRMED',
-          notes: 'Revisar vibración en carretera',
-          estimateCents: 3918,
-          vehicle: v,
-          service: s,
-        },
-        i: I = {
-          id: 'demo-item',
-          sku: 'TIRE-2755022',
-          name: 'Caucho all terrain 275/50 R22',
-          category: 'Cauchos',
-          priceCents: 19581,
-          stock: 4,
-          productBrand: 'Roadcruza',
-          productModel: 'RA1100',
-          vehicleMake: 'Nissan',
-          vehicleModel: 'Armada',
-          active: true,
-          tireSize: '275/50 R22',
-        };
-      PR({ name: 'Alex Demo', email: 'demo@protires.local' });
-      V([v]);
-      Q(v.id);
-      AP([a]);
-      I([i]);
+    [notice, N] = useState(''),
+    [slotsVersion, setSlotsVersion] = useState(0),
+    [busy, setBusy] = useState(false);
+
+  function clearSession(message = '') {
+    localStorage.removeItem('token');
+    localStorage.removeItem('role');
+    T('');
+    PR(null);
+    V([]);
+    AP([]);
+    Q('');
+    SV('home');
+    if (message) N(message);
+  }
+  function handleError(error: unknown, fallback: string) {
+    if (error instanceof SessionExpiredError) {
+      clearSession(error.message);
+      M('login');
       return;
     }
-    fetch('/api/services')
-      .then(r => (r.ok ? r.json() : []))
-      .then((data: S[]) => S(data))
-      .catch(() => S([]));
-    fetch('/api/vehicles', { headers })
-      .then(r => (r.ok ? r.json() : []))
-      .then((v: V[]) => {
-        V(v);
-        if (v[0]) Q(v[0].id);
-      })
-      .catch(() => V([]));
-    if (token) {
-      fetch('/api/me', { headers })
-        .then(r => (r.ok ? r.json() : null))
-        .then(PR)
-        .catch(() => PR(null));
-      fetch('/api/appointments', { headers })
-        .then(r => (r.ok ? r.json() : []))
-        .then(AP)
-        .catch(() => AP([]));
-    } else {
-      PR(null);
-      AP([]);
-    }
-  }, [token, demoMode]);
+    N(errorText(error, fallback));
+  }
+  async function logout() {
+    const current = token;
+    clearSession('Sesión cerrada.');
+    // Invalida el token también en el servidor; si falla, el token vence solo en 12 h.
+    if (current) await apiFetch('/api/auth/logout', { method: 'POST', token: current }).catch(() => undefined);
+  }
+  function startSession(session: Session) {
+    const role = session.user.role === 'ADMIN' ? 'ADMIN' : 'CUSTOMER';
+    localStorage.setItem('token', session.token);
+    localStorage.setItem('role', role);
+    T(session.token);
+    PR(session.user);
+    SV(role === 'ADMIN' ? 'admin' : 'dashboard');
+  }
+
   useEffect(() => {
-    if (demoMode) return;
+    apiFetch<S[]>('/api/services')
+      .then(S)
+      .catch(() => S([]));
+  }, []);
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    Promise.all([
+      apiFetch<Profile & { role: string }>('/api/me', { token }),
+      apiFetch<V[]>('/api/vehicles', { token }),
+      apiFetch<A[]>('/api/appointments', { token }),
+    ])
+      .then(([me, myVehicles, myAppointments]) => {
+        if (cancelled) return;
+        PR(me);
+        localStorage.setItem('role', me.role === 'ADMIN' ? 'ADMIN' : 'CUSTOMER');
+        if (me.role === 'ADMIN' && view === 'dashboard') SV('admin');
+        V(myVehicles);
+        Q(current => current || myVehicles[0]?.id || '');
+        AP(myAppointments);
+      })
+      .catch(error => !cancelled && handleError(error, 'No se pudieron cargar tus datos.'));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  useEffect(() => {
     const v = vehicles.find(x => x.id === selected);
-    fetch(
-      '/api/inventory?' + new URLSearchParams({ q: query, vehicleMake: v?.make || '', vehicleModel: v?.model || '' }),
+    let cancelled = false;
+    apiFetch<I[]>(
+      '/api/inventory?' +
+        new URLSearchParams({ q: debouncedQuery, vehicleMake: v?.make || '', vehicleModel: v?.model || '' }),
     )
-      .then(r => (r.ok ? r.json() : []))
-      .then(I)
-      .catch(() => I([]));
-  }, [query, selected, vehicles, demoMode]);
+      .then(data => !cancelled && I(data))
+      .catch(() => !cancelled && I([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedQuery, selected, vehicles]);
+
   async function account(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const data = Object.fromEntries(new FormData(e.currentTarget)),
-      path = modal === 'register' ? '/api/auth/register' : '/api/auth/login';
+    const data = Object.fromEntries(new FormData(e.currentTarget));
+    const path = modal === 'register' ? '/api/auth/register' : '/api/auth/login';
+    setBusy(true);
     try {
-      const r = await fetch(path, { method: 'POST', headers, body: JSON.stringify(data) }),
-        d = await r.json();
-      if (!r.ok) {
-        N(d.error || 'No se pudo completar la solicitud');
-        return;
-      }
-      const role = d.user?.role === 'ADMIN' ? 'ADMIN' : 'CUSTOMER';
-      localStorage.setItem('token', d.token);
-      localStorage.setItem('role', role);
-      T(d.token);
-      SD(false);
-      SAM(false);
-      SV(role === 'ADMIN' ? 'admin' : 'dashboard');
+      const session = await apiFetch<Session>(path, { method: 'POST', body: data });
+      startSession(session);
       M('');
-      N(role === 'ADMIN' ? 'Panel de administración' : 'Sesión iniciada');
-    } catch {
-      N('No responde el servidor. Inténtalo de nuevo más tarde.');
+      N(session.user.role === 'ADMIN' ? 'Panel de administración' : 'Sesión iniciada');
+    } catch (error) {
+      N(errorText(error, 'No se pudo completar la solicitud'));
+    } finally {
+      setBusy(false);
     }
   }
   async function vehicle(e: React.FormEvent<HTMLFormElement>) {
@@ -286,53 +202,121 @@ export default function App() {
       N('Ingresa la marca y el modelo del vehículo');
       return;
     }
-    const r = await fetch('/api/vehicles', { method: 'POST', headers, body: JSON.stringify(formData) }),
-      d = await r.json();
-    if (!r.ok) {
-      N(d.error);
-      return;
+    try {
+      const saved = await apiFetch<V>('/api/vehicles', { method: 'POST', token, body: formData });
+      V([...vehicles, saved]);
+      Q(saved.id);
+      M(modal === 'vehicle-then-book' ? 'appointment' : '');
+      N('Vehículo guardado');
+    } catch (error) {
+      handleError(error, 'No se pudo guardar el vehículo.');
     }
-    V([...vehicles, d]);
-    Q(d.id);
-    M('');
   }
   async function book(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!token) {
       M('login');
+      N('Inicia sesión o crea tu cuenta para reservar.');
       return;
     }
-    const formData = Object.fromEntries(new FormData(e.currentTarget));
-    const r = await fetch('/api/appointments', { method: 'POST', headers, body: JSON.stringify(formData) }),
-      d = await r.json();
-    N(
-      r.ok
-        ? d.estimateCents > 0
-          ? 'Solicitud enviada al taller. Estimado: ' + money(d.estimateCents)
-          : 'Solicitud enviada al taller. Precio por confirmar.'
-        : d.error,
-    );
-    if (r.ok) {
-      AP(await fetch('/api/appointments', { headers }).then(r => r.json()));
+    const form = e.currentTarget;
+    const formData = Object.fromEntries(new FormData(form));
+    if (!formData.startsAt) {
+      N('Elige una fecha y un horario disponible.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const created = await apiFetch<A>('/api/appointments', { method: 'POST', token, body: formData });
+      N(
+        created.estimateCents > 0
+          ? `Solicitud enviada. El taller te confirmará la cita en tu panel. Estimado: ${money(created.estimateCents)}`
+          : 'Solicitud enviada. El taller te confirmará la cita y el precio en tu panel.',
+      );
+      AP(await apiFetch<A[]>('/api/appointments', { token }));
+      setSlotsVersion(v => v + 1);
       M('');
-      (e.target as HTMLFormElement).reset();
+      form.reset();
+    } catch (error) {
+      handleError(error, 'No se pudo reservar la cita.');
+      setSlotsVersion(v => v + 1);
+    } finally {
+      setBusy(false);
     }
   }
-  if ((token || adminMode) && view === 'admin')
+  async function cancelAppointment(appointment: A) {
+    if (!window.confirm(`¿Cancelar la cita de ${appointment.service.name}?`)) return;
+    try {
+      await apiFetch(`/api/appointments/${appointment.id}/cancel`, { method: 'POST', token });
+      AP(list => list.map(a => (a.id === appointment.id ? { ...a, status: 'CANCELLED' } : a)));
+      setSlotsVersion(v => v + 1);
+      N('Cita cancelada.');
+    } catch (error) {
+      handleError(error, 'No se pudo cancelar la cita.');
+    }
+  }
+  async function changePassword(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const data = Object.fromEntries(new FormData(e.currentTarget)) as Record<string, string>;
+    if (data.newPassword !== data.confirmPassword) {
+      N('La nueva contraseña y su confirmación no coinciden.');
+      return;
+    }
+    try {
+      const session = await apiFetch<Session>('/api/auth/password', {
+        method: 'POST',
+        token,
+        body: { currentPassword: data.currentPassword, newPassword: data.newPassword },
+      });
+      startSession(session);
+      M('');
+      N('Contraseña actualizada. Se cerraron tus otras sesiones.');
+    } catch (error) {
+      handleError(error, 'No se pudo cambiar la contraseña.');
+    }
+  }
+  const goToBooking = () => {
+    SV('home');
+    setTimeout(() => document.getElementById('agenda')?.scrollIntoView({ behavior: 'smooth' }), 80);
+  };
+
+  if (token && view === 'admin')
+    return <AdminPanel token={token} onLogout={logout} onSessionExpired={message => clearSession(message)} />;
+
+  const now = Date.now();
+  const upcoming = appointments.filter(a => new Date(a.startsAt).getTime() >= now);
+  const past = appointments
+    .filter(a => new Date(a.startsAt).getTime() < now)
+    .reverse()
+    .slice(0, 5);
+  const appointmentRow = (a: A, isPast = false) => {
+    const cancellable = !isPast && (a.status === 'PENDING' || a.status === 'CONFIRMED');
     return (
-      <AdminPanel
-        token={token}
-        demoMode={adminMode}
-        onLogout={() => {
-          localStorage.removeItem('token');
-          localStorage.removeItem('role');
-          T('');
-          SAM(false);
-          SV('home');
-        }}
-      />
+      <article className={'appointmentRow' + (isPast ? ' past' : '')} key={a.id}>
+        <div className="dateTile">
+          <b>{dayNumber(a.startsAt)}</b>
+          <small>{monthShort(a.startsAt)}</small>
+        </div>
+        <div className="appointmentInfo">
+          <b>{a.service.name}</b>
+          <small>
+            {a.vehicle.make} {a.vehicle.model} · {timeLabel(a.startsAt)}
+            {a.estimateCents > 0 ? ` · Estimado ${money(a.estimateCents)}` : ''}
+          </small>
+        </div>
+        <div className="appointmentMeta">
+          <span className={'statusTag ' + a.status.toLowerCase()}>{STATUS_LABEL[a.status] || a.status}</span>
+          {cancellable && (
+            <button type="button" className="cancelLink" onClick={() => cancelAppointment(a)}>
+              Cancelar
+            </button>
+          )}
+        </div>
+      </article>
     );
-  if ((token || demoMode) && view === 'dashboard')
+  };
+
+  if (token && view === 'dashboard')
     return (
       <div className="dashboard">
         <nav className="dashNav">
@@ -343,13 +327,11 @@ export default function App() {
             <button className="active">
               <UserRound size={16} /> Mi panel
             </button>
-            <button
-              onClick={() => {
-                SV('home');
-                setTimeout(() => document.getElementById('agenda')?.scrollIntoView({ behavior: 'smooth' }), 80);
-              }}
-            >
+            <button onClick={goToBooking}>
               <CalendarDays size={16} /> Agendar cita
+            </button>
+            <button onClick={() => M('password')}>
+              <KeyRound size={16} /> Contraseña
             </button>
           </div>
           <div className="dashUser">
@@ -364,17 +346,7 @@ export default function App() {
               <b>{profile?.name || 'Mi cuenta'}</b>
               <small>{profile?.email}</small>
             </div>
-            <button
-              className="logout"
-              onClick={() => {
-                localStorage.removeItem('token');
-                T('');
-                SD(false);
-                V([]);
-                SV('home');
-              }}
-              aria-label="Cerrar sesión"
-            >
+            <button className="logout" onClick={logout} aria-label="Cerrar sesión">
               <LogOut size={17} />
             </button>
           </div>
@@ -391,13 +363,7 @@ export default function App() {
               </h1>
               <p>Todo listo para que sigas tu camino con tranquilidad.</p>
             </div>
-            <button
-              className="btn"
-              onClick={() => {
-                SV('home');
-                setTimeout(() => document.getElementById('agenda')?.scrollIntoView({ behavior: 'smooth' }), 80);
-              }}
-            >
+            <button className="btn" onClick={goToBooking}>
               Agendar servicio <ArrowUpRight size={16} />
             </button>
           </div>
@@ -416,8 +382,8 @@ export default function App() {
                 <CalendarDays />
               </span>
               <div>
-                <small>CITAS REGISTRADAS</small>
-                <b>{appointments.length}</b>
+                <small>PRÓXIMAS CITAS</small>
+                <b>{upcoming.filter(a => a.status !== 'CANCELLED').length}</b>
               </div>
             </article>
             <article>
@@ -479,46 +445,22 @@ export default function App() {
                 </div>
                 <CalendarDays className="panelIcon" />
               </div>
-              {appointments.map(a => (
-                <article className="appointmentRow" key={a.id}>
-                  <div className="dateTile">
-                    <b>
-                      {new Date(a.startsAt).toLocaleDateString('es-VE', {
-                        day: '2-digit',
-                        timeZone: 'America/Caracas',
-                      })}
-                    </b>
-                    <small>
-                      {new Date(a.startsAt).toLocaleDateString('es-VE', {
-                        month: 'short',
-                        timeZone: 'America/Caracas',
-                      })}
-                    </small>
-                  </div>
-                  <div className="appointmentInfo">
-                    <b>{a.service.name}</b>
-                    <small>
-                      {a.vehicle.make} {a.vehicle.model} ·{' '}
-                      {new Date(a.startsAt).toLocaleTimeString('es-VE', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        timeZone: 'America/Caracas',
-                      })}
-                    </small>
-                  </div>
-                  <span className="confirmed">Confirmada</span>
-                </article>
-              ))}
-              {!appointments.length && (
-                <div className="dashEmpty">No tienes citas próximas. Reserva tu primera visita.</div>
+              {upcoming.map(a => appointmentRow(a))}
+              {!upcoming.length && (
+                <div className="dashEmpty">No tienes citas próximas. Reserva tu próxima visita.</div>
               )}
-              <button
-                className="textLink"
-                onClick={() => {
-                  SV('home');
-                  setTimeout(() => document.getElementById('agenda')?.scrollIntoView({ behavior: 'smooth' }), 80);
-                }}
-              >
+              {upcoming.some(a => a.status === 'PENDING') && (
+                <div className="dashEmpty">
+                  Las citas pendientes esperan la confirmación del taller. Te avisamos aquí mismo.
+                </div>
+              )}
+              {past.length > 0 && (
+                <>
+                  <div className="panelSubhead">ANTERIORES</div>
+                  {past.map(a => appointmentRow(a, true))}
+                </>
+              )}
+              <button className="textLink" onClick={goToBooking}>
                 Reservar una cita <ChevronRight size={15} />
               </button>
             </section>
@@ -558,37 +500,81 @@ export default function App() {
           </div>
         </main>
         {notice && (
-          <div className="toast">
+          <div className="toast" role="status">
             <Check size={16} />
             {notice}
-            <button onClick={() => N('')}>
+            <button onClick={() => N('')} aria-label="Cerrar aviso">
               <X size={15} />
             </button>
           </div>
         )}
         {modal && (
           <div className="overlay" onClick={() => M('')}>
-            <form className="modal" onSubmit={vehicle} onClick={e => e.stopPropagation()}>
-              <button className="close" type="button" onClick={() => M('')}>
+            <form
+              className="modal"
+              onSubmit={modal === 'password' ? changePassword : vehicle}
+              onClick={e => e.stopPropagation()}
+            >
+              <button className="close" type="button" onClick={() => M('')} aria-label="Cerrar">
                 <X />
               </button>
-              <div className="eyebrow dark">
-                <i /> TU GARAJE
-              </div>
-              <h2>Agrega tu vehículo</h2>
-              <VehicleCatalogFields />
-              <div className="twocol">
-                <input className="field" name="year" type="number" placeholder="Año" required />
-                <input className="field" name="plate" placeholder="Placa" required />
-              </div>
-              <input className="field" name="engine" placeholder="Motor (opcional)" />
-              <input className="field" name="tireSize" placeholder="Medida caucho (opcional)" />
-              <button className="btn full">Guardar vehículo</button>
+              {modal === 'password' ? (
+                <>
+                  <div className="eyebrow dark">
+                    <i /> TU CUENTA
+                  </div>
+                  <h2>Cambia tu contraseña</h2>
+                  <input
+                    className="field"
+                    name="currentPassword"
+                    type="password"
+                    placeholder="Contraseña actual"
+                    autoComplete="current-password"
+                    required
+                  />
+                  <input
+                    className="field"
+                    name="newPassword"
+                    type="password"
+                    minLength={10}
+                    placeholder="Nueva contraseña (10 caracteres mínimo)"
+                    autoComplete="new-password"
+                    required
+                  />
+                  <input
+                    className="field"
+                    name="confirmPassword"
+                    type="password"
+                    minLength={10}
+                    placeholder="Repite la nueva contraseña"
+                    autoComplete="new-password"
+                    required
+                  />
+                  <button className="btn full">Guardar contraseña</button>
+                </>
+              ) : (
+                <>
+                  <div className="eyebrow dark">
+                    <i /> TU GARAJE
+                  </div>
+                  <h2>Agrega tu vehículo</h2>
+                  <VehicleCatalogFields />
+                  <div className="twocol">
+                    <input className="field" name="year" type="number" placeholder="Año" required />
+                    <input className="field" name="plate" placeholder="Placa" required />
+                  </div>
+                  <input className="field" name="engine" placeholder="Motor (opcional)" />
+                  <input className="field" name="tireSize" placeholder="Medida caucho (opcional)" />
+                  <button className="btn full">Guardar vehículo</button>
+                </>
+              )}
             </form>
           </div>
         )}
       </div>
     );
+
+  const selectedVehicle = vehicles.find(v => v.id === selected);
   return (
     <>
       <nav className="nav wrap">
@@ -687,7 +673,18 @@ export default function App() {
         <div className="services">
           {services.map((service, index) => (
             <article className="service" key={service.id}>
-              <img className="serviceThumb" src={serviceArt(service)} alt={'Imagen ilustrativa: ' + service.name} />
+              <img
+                className="serviceThumb"
+                src={serviceArt(service)}
+                alt={'Imagen ilustrativa: ' + service.name}
+                loading="lazy"
+                onError={e => {
+                  // Si la foto subida no carga, se usa la ilustración local.
+                  const img = e.currentTarget;
+                  const fallback = serviceArt({ ...service, imageUrl: null });
+                  if (!img.src.endsWith(fallback)) img.src = fallback;
+                }}
+              />
               <div className="serviceCopy">
                 <small>
                   {String(index + 1).padStart(2, '0')} · {service.category}
@@ -703,7 +700,8 @@ export default function App() {
                 className="serviceBook"
                 onClick={() => {
                   BS(service.id);
-                  M('appointment');
+                  M(token ? 'appointment' : 'login');
+                  if (!token) N('Inicia sesión o crea tu cuenta para reservar.');
                 }}
               >
                 Agendar cita <ArrowUpRight size={15} />
@@ -735,47 +733,21 @@ export default function App() {
               </div>
               <span>● DISPONIBLE</span>
             </div>
-            <label>Tu vehículo</label>
-            <div className="selectrow">
-              <Car size={17} />
-              <select name="vehicleId" value={selected} onChange={e => Q(e.target.value)} required>
-                <option value="">{vehicles.length ? 'Selecciona vehículo' : 'Agrega un vehículo'}</option>
-                {vehicles.map(v => (
-                  <option key={v.id} value={v.id}>
-                    {v.make} {v.model} · {v.plate}
-                  </option>
-                ))}
-              </select>
-              <button type="button" onClick={() => M(token ? 'vehicle' : 'login')}>
-                <Plus size={17} />
-              </button>
-            </div>
-            <label>Servicio</label>
-            <select className="field" name="serviceId" required>
-              <option value="">¿Qué necesita tu auto?</option>
-              {services.map(s => (
-                <option key={s.id} value={s.id}>
-                  {s.name} · {s.priceCents > 0 ? `desde ${money(s.priceCents)}` : 'precio por consultar'}
-                </option>
-              ))}
-            </select>
-            <div className="twocol">
-              <div>
-                <label>Fecha y hora</label>
-                <input className="field" type="datetime-local" name="startsAt" required min={caracasNow()} />
-              </div>
-              <div>
-                <label>
-                  Notas <small>(opcional)</small>
-                </label>
-                <input className="field" name="notes" placeholder="Cuéntanos un detalle" />
-              </div>
-            </div>
-            <button className="btn full">
-              Confirmar cita <ArrowUpRight size={16} />
+            <BookingFields
+              vehicles={vehicles}
+              services={services}
+              vehicleId={selected}
+              onVehicleChange={Q}
+              serviceId={bookingService}
+              onServiceChange={BS}
+              onAddVehicle={() => M(token ? 'vehicle' : 'login')}
+              refreshKey={slotsVersion}
+            />
+            <button className="btn full" disabled={busy}>
+              {busy ? 'Enviando…' : 'Solicitar cita'} <ArrowUpRight size={16} />
             </button>
             <div className="fine">
-              Atención: 8:30 a. m. – 5:30 p. m. · Confirmación inmediata · Sin costo de reserva
+              Lunes a sábado, 8:30 a. m. – 5:30 p. m. · El taller confirma tu solicitud · Sin costo de reserva
             </div>
           </form>
         </div>
@@ -800,14 +772,19 @@ export default function App() {
               <Disc3 size={19} /> Repuestos y cauchos
             </b>
             <small>
-              {vehicles.find(v => v.id === selected)
-                ? `Compatible con ${vehicles.find(v => v.id === selected)?.make} ${vehicles.find(v => v.id === selected)?.model}`
+              {selectedVehicle
+                ? `Compatible con ${selectedVehicle.make} ${selectedVehicle.model}`
                 : 'Selecciona tu vehículo para filtrar'}
             </small>
           </div>
           <div className="search">
             <Search size={16} />
-            <input placeholder="Medida, nombre o código..." value={query} onChange={e => U(e.target.value)} />
+            <input
+              placeholder="Medida, nombre o código..."
+              value={query}
+              maxLength={80}
+              onChange={e => U(e.target.value)}
+            />
           </div>
         </div>
         <div className="products">
@@ -851,7 +828,7 @@ export default function App() {
         <div className="footerBusiness">
           <b>Protires Services</b>
           <span>RIF J-500192975</span>
-          <span>Atención: 8:30 a. m. – 5:30 p. m.</span>
+          <span>Atención: lunes a sábado, 8:30 a. m. – 5:30 p. m.</span>
         </div>
         <address className="footerContact">
           <span>Av. principal de La Guairita, vía Cementerio del Este, 200 m después del arco de El Hatillo</span>
@@ -880,10 +857,10 @@ export default function App() {
         <span className="footerCopyright">© 2026 Protires Services · Caracas, Venezuela</span>
       </footer>
       {notice && (
-        <div className="toast">
+        <div className="toast" role="status">
           <Check size={16} />
           {notice}
-          <button onClick={() => N('')}>
+          <button onClick={() => N('')} aria-label="Cerrar aviso">
             <X size={15} />
           </button>
         </div>
@@ -892,20 +869,20 @@ export default function App() {
         <div className="overlay" onClick={() => M('')}>
           <form
             className="modal"
-            onSubmit={modal === 'appointment' ? book : modal === 'vehicle' ? vehicle : account}
+            onSubmit={modal === 'appointment' ? book : modal.startsWith('vehicle') ? vehicle : account}
             onClick={e => e.stopPropagation()}
           >
-            <button className="close" type="button" onClick={() => M('')}>
+            <button className="close" type="button" onClick={() => M('')} aria-label="Cerrar">
               <X />
             </button>
             <div className="eyebrow dark">
               <i />
-              {modal === 'appointment' ? 'RESERVA ONLINE' : modal === 'vehicle' ? 'TU GARAJE' : 'BIENVENIDO'}
+              {modal === 'appointment' ? 'RESERVA ONLINE' : modal.startsWith('vehicle') ? 'TU GARAJE' : 'BIENVENIDO'}
             </div>
             <h2>
               {modal === 'appointment'
                 ? 'Agenda tu visita'
-                : modal === 'vehicle'
+                : modal.startsWith('vehicle')
                   ? 'Agrega tu vehículo'
                   : modal === 'register'
                     ? 'Crea tu cuenta.'
@@ -915,38 +892,22 @@ export default function App() {
             </h2>
             {modal === 'appointment' ? (
               <>
-                <label>Vehículo</label>
-                <select className="field" name="vehicleId" value={selected} onChange={e => Q(e.target.value)} required>
-                  <option value="">Selecciona un vehículo</option>
-                  {vehicles.map(v => (
-                    <option key={v.id} value={v.id}>
-                      {v.make} {v.model} · {v.plate}
-                    </option>
-                  ))}
-                </select>
-                <label>Servicio</label>
-                <select
-                  className="field"
-                  name="serviceId"
-                  value={bookingService}
-                  onChange={e => BS(e.target.value)}
-                  required
-                >
-                  {services.map(s => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} · desde {money(s.priceCents)}
-                    </option>
-                  ))}
-                </select>
-                <label>Fecha y hora</label>
-                <input className="field" type="datetime-local" name="startsAt" required min={caracasNow()} />
-                <label>Notas (opcional)</label>
-                <input className="field" name="notes" placeholder="Cuéntanos qué necesita tu vehículo" />
-                <button className="btn full">
-                  Confirmar cita <ArrowUpRight size={16} />
+                <BookingFields
+                  vehicles={vehicles}
+                  services={services}
+                  vehicleId={selected}
+                  onVehicleChange={Q}
+                  serviceId={bookingService}
+                  onServiceChange={BS}
+                  onAddVehicle={() => M('vehicle-then-book')}
+                  refreshKey={slotsVersion}
+                />
+                <button className="btn full" disabled={busy}>
+                  {busy ? 'Enviando…' : 'Solicitar cita'} <ArrowUpRight size={16} />
                 </button>
+                <small className="modalHint">El taller confirma tu solicitud y la verás en tu panel.</small>
               </>
-            ) : modal === 'vehicle' ? (
+            ) : modal.startsWith('vehicle') ? (
               <>
                 <VehicleCatalogFields />
                 <div className="twocol">
@@ -959,20 +920,35 @@ export default function App() {
               </>
             ) : (
               <>
-                <input className="field" name="name" placeholder="Tu nombre" required={modal === 'register'} />
-                <input className="field" name="email" type="email" placeholder="Correo electrónico" required />
+                {modal === 'register' && <input className="field" name="name" placeholder="Tu nombre" required />}
+                <input
+                  className="field"
+                  name="email"
+                  type="email"
+                  placeholder="Correo electrónico"
+                  autoComplete="email"
+                  required
+                />
                 <input
                   className="field"
                   name="password"
                   type="password"
-                  minLength={10}
-                  placeholder="Contraseña (10 caracteres mínimo)"
+                  minLength={modal === 'register' ? 10 : undefined}
+                  placeholder={modal === 'register' ? 'Contraseña (10 caracteres mínimo)' : 'Contraseña'}
+                  autoComplete={modal === 'register' ? 'new-password' : 'current-password'}
                   required
                 />
-                <button className="btn full">{modal === 'register' ? 'Crear cuenta' : 'Iniciar sesión'}</button>
-                <button type="button" className="switch" onClick={() => M(modal === 'login' ? 'register' : 'login')}>
-                  {modal === 'login' ? 'Crear cuenta' : 'Ya tengo cuenta'}
+                <button className="btn full" disabled={busy}>
+                  {busy ? 'Un momento…' : modal === 'register' ? 'Crear cuenta' : 'Iniciar sesión'}
                 </button>
+                <button type="button" className="switch" onClick={() => M(modal === 'register' ? 'login' : 'register')}>
+                  {modal === 'register' ? 'Ya tengo cuenta' : 'Crear cuenta'}
+                </button>
+                {modal !== 'register' && (
+                  <small className="modalHint">
+                    ¿Olvidaste tu contraseña? Llama al taller al {SHOP_PHONE} y te damos una clave temporal.
+                  </small>
+                )}
                 <button type="button" className="switch" onClick={() => M('adminlogin')}>
                   Acceso administrador
                 </button>

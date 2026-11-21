@@ -2,9 +2,12 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// Postgres (Neon desde el Marketplace de Vercel). La integración de Neon crea las dos variables:
+// DATABASE_URL (con pooler, la usa la app) y DATABASE_URL_UNPOOLED (directa, la usan las migraciones).
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
 model User {
@@ -59,6 +62,9 @@ model Appointment {
   user          User     @relation(fields: [userId], references: [id])
   vehicle       Vehicle  @relation(fields: [vehicleId], references: [id])
   service       Service  @relation(fields: [serviceId], references: [id])
+
+  @@index([startsAt, status])
+  @@index([userId, status])
 }
 
 model PartsInventory {
@@ -76,4 +82,14 @@ model PartsInventory {
   tireSize      String?
   active        Boolean  @default(true)
   updatedAt     DateTime @updatedAt
+}
+
+// Límites de intentos compartidos entre instancias de Vercel (la memoria de cada función no se comparte).
+// expiresAt va en milisegundos epoch para no depender de la zona horaria de la sesión de Postgres.
+model RateLimit {
+  key       String @id
+  count     Int
+  expiresAt BigInt
+
+  @@index([expiresAt])
 }

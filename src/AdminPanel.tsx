@@ -4,9 +4,9 @@ import {
   ArrowUpRight,
   CalendarDays,
   Check,
-  ChevronRight,
   Clock,
   Disc3,
+  KeyRound,
   LogOut,
   Package,
   Plus,
@@ -14,9 +14,14 @@ import {
   Search,
   Settings2,
   ShieldCheck,
+  UserRoundCog,
   Users,
   X,
 } from 'lucide-react';
+import { apiFetch, errorText, SessionExpiredError } from './api';
+import { caracasDay, money as cash, STATUS_LABEL } from './format';
+import { optimizeImage } from './imageOptimize';
+
 type Item = {
   id: string;
   sku: string;
@@ -52,330 +57,163 @@ type Service = {
   durationMin: number;
   imageUrl?: string | null;
 };
-const cash = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n / 100);
+type Filter = 'upcoming' | 'pending' | 'all';
 const toCents = (amount: unknown) => Math.round(Number(amount) * 100);
-const caracasDay = (date: Date) =>
-  new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Caracas',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(date);
-const sampleItems: Item[] = [
-  {
-    id: 'demo-tire',
-    sku: 'TIRE-2755022',
-    name: 'Caucho all terrain 275/50 R22',
-    category: 'Cauchos',
-    priceCents: 19581,
-    stock: 4,
-    compatibility: 'Armada',
-    productBrand: 'Roadcruza',
-    productModel: 'RA1100',
-    vehicleMake: 'Nissan',
-    vehicleModel: 'Armada',
-    active: true,
-    tireSize: '275/50 R22',
-  },
-  {
-    id: 'demo-oil',
-    sku: 'OIL-5W30',
-    name: 'Aceite sintético 5W-30 (4L)',
-    category: 'Lubricantes',
-    priceCents: 3392,
-    stock: 12,
-    compatibility: 'Corolla,Civic,Mazda 3',
-    productBrand: 'Toyota',
-    productModel: '5W-30',
-    active: true,
-  },
-];
-const requestedServices: Service[] = [
-  {
-    id: 'offline-service-0',
-    name: 'Alineación',
-    category: 'Cauchera',
-    description: 'Alineación de ruedas para estabilidad y desgaste uniforme.',
-    priceCents: 0,
-    durationMin: 30,
-    active: true,
-  },
-  {
-    id: 'offline-service-1',
-    name: 'Balanceo estático',
-    category: 'Cauchera',
-    description: 'Balanceo estático de ruedas.',
-    priceCents: 0,
-    durationMin: 30,
-    active: true,
-  },
-  {
-    id: 'offline-service-2',
-    name: 'Balanceo dinámico',
-    category: 'Cauchera',
-    description: 'Balanceo dinámico para corregir vibraciones.',
-    priceCents: 0,
-    durationMin: 30,
-    active: true,
-  },
-  {
-    id: 'offline-service-3',
-    name: 'Reparación de cauchos',
-    category: 'Cauchera',
-    description: 'Inspección y reparación de cauchos.',
-    priceCents: 0,
-    durationMin: 30,
-    active: true,
-  },
-  {
-    id: 'offline-service-4',
-    name: 'Instalación de sistemas de blindaje para cauchos',
-    category: 'Cauchera',
-    description: 'Instalación de sistemas de blindaje para cauchos.',
-    priceCents: 0,
-    durationMin: 30,
-    active: true,
-  },
-  {
-    id: 'offline-service-5',
-    name: 'Sensores TPMS',
-    category: 'Cauchera',
-    description: 'Servicio de sensores de presión TPMS.',
-    priceCents: 0,
-    durationMin: 30,
-    active: true,
-  },
-  {
-    id: 'offline-service-6',
-    name: 'Mecánica ligera (tren delantero y trasero)',
-    category: 'Mecánica',
-    description: 'Mecánica ligera para tren delantero y trasero.',
-    priceCents: 0,
-    durationMin: 30,
-    active: true,
-  },
-  {
-    id: 'offline-service-7',
-    name: 'Frenos',
-    category: 'Mecánica',
-    description: 'Revisión y servicio del sistema de frenos.',
-    priceCents: 0,
-    durationMin: 30,
-    active: true,
-  },
-  {
-    id: 'offline-service-8',
-    name: 'Servicio de escáner y entonación',
-    category: 'Mecánica',
-    description: 'Diagnóstico electrónico y entonación.',
-    priceCents: 0,
-    durationMin: 30,
-    active: true,
-  },
-  {
-    id: 'offline-service-9',
-    name: 'Limpieza de inyectores',
-    category: 'Mecánica',
-    description: 'Limpieza del sistema de inyección.',
-    priceCents: 0,
-    durationMin: 30,
-    active: true,
-  },
-  {
-    id: 'offline-service-10',
-    name: 'Rectificación de discos de freno',
-    category: 'Mecánica',
-    description: 'Evaluación y rectificación de discos.',
-    priceCents: 0,
-    durationMin: 30,
-    active: true,
-  },
-];
-const sampleAppointments: Appt[] = [
-  {
-    id: 'demo-pending',
-    startsAt: new Date(Date.now() + 259200000).toISOString(),
-    status: 'PENDING',
-    notes: 'Solicitud para revisar frenos',
-    estimateCents: 2578,
-    user: { name: 'Alex Demo', email: 'demo@protires.local' },
-    vehicle: { make: 'Nissan', model: 'Armada', plate: 'DEMO-01' },
-    service: { name: 'Revisión de frenos' },
-  },
-  {
-    id: 'demo-confirmed',
-    startsAt: new Date(Date.now() + 172800000).toISOString(),
-    status: 'CONFIRMED',
-    notes: 'Revisar vibración en carretera',
-    estimateCents: 3918,
-    user: { name: 'Alex Demo', email: 'demo@protires.local' },
-    vehicle: { make: 'Nissan', model: 'Armada', plate: 'DEMO-01' },
-    service: { name: 'Alineación y balanceo' },
-  },
-];
+
 export default function AdminPanel({
   token,
-  demoMode,
   onLogout,
+  onSessionExpired,
 }: {
   token: string;
-  demoMode: boolean;
   onLogout: () => void;
+  onSessionExpired: (message: string) => void;
 }) {
   const [tab, ST] = useState<'appointments' | 'inventory' | 'services'>('appointments'),
-    [items, SI] = useState<Item[]>(demoMode ? sampleItems : []),
-    [appts, SA] = useState<Appt[]>(demoMode ? sampleAppointments : []),
-    [services, SS] = useState<Service[]>(demoMode ? requestedServices : []),
-    [fallback, SF] = useState(demoMode),
+    [items, SI] = useState<Item[]>([]),
+    [appts, SA] = useState<Appt[]>([]),
+    [services, SS] = useState<Service[]>([]),
+    [filter, SFilter] = useState<Filter>('upcoming'),
     [modal, SM] = useState(false),
     [itemEditor, EI] = useState<Item | null>(null),
     [serviceEditor, SE] = useState<'create' | Service | null>(null),
+    [accountModal, SAccount] = useState<'' | 'reset' | 'password'>(''),
+    [resetResult, SReset] = useState<{ email: string; name: string; temporaryPassword: string } | null>(null),
     [query, SQ] = useState(''),
-    [message, SN] = useState('');
-  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    [message, SN] = useState(''),
+    [saving, SSaving] = useState(false),
+    [version, SVersion] = useState(0);
+
+  function fail(error: unknown, fallback: string) {
+    if (error instanceof SessionExpiredError) return onSessionExpired(error.message);
+    SN(errorText(error, fallback));
+  }
+
   useEffect(() => {
-    if (demoMode) return;
-    let failed = false;
+    let cancelled = false;
     Promise.all([
-      fetch('/api/admin/appointments', { headers }).then(r => (r.ok ? r.json() : Promise.reject())),
-      fetch('/api/admin/inventory', { headers }).then(r => (r.ok ? r.json() : Promise.reject())),
-      fetch('/api/admin/services', { headers }).then(r => (r.ok ? r.json() : Promise.reject())),
+      apiFetch<Appt[]>('/api/admin/appointments', { token }),
+      apiFetch<Item[]>('/api/admin/inventory', { token }),
+      apiFetch<Service[]>('/api/admin/services', { token }),
     ])
       .then(([a, i, s]) => {
+        if (cancelled) return;
         SA(a);
         SI(i);
         SS(s);
       })
-      .catch(() => {
-        failed = true;
-        if (!import.meta.env.DEV) {
-          SN('No se pudo cargar la administración. Verifica el servidor.');
-          return;
-        }
-        SF(true);
-        SA(sampleAppointments);
-        SI(sampleItems);
-        SS(requestedServices);
-      });
+      .catch(error => !cancelled && fail(error, 'No se pudo cargar la administración. Verifica el servidor.'));
     return () => {
-      failed = true;
+      cancelled = true;
     };
-  }, [token, demoMode]);
-  async function changeStatus(id: string, status: string) {
-    if (fallback) {
-      SA(x => x.map(a => (a.id === id ? { ...a, status } : a)));
-      SN(status === 'CONFIRMED' ? 'Cita aceptada' : 'Cita rechazada');
-      return;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, version]);
+
+  async function changeStatus(appointment: Appt, status: 'CONFIRMED' | 'CANCELLED') {
+    if (status === 'CANCELLED' && appointment.status === 'CONFIRMED') {
+      if (!window.confirm(`¿Cancelar la cita confirmada de ${appointment.user.name}? Avísale por teléfono.`)) return;
     }
     try {
-      const r = await fetch(`/api/admin/appointments/${id}`, {
+      const updated = await apiFetch<Appt>(`/api/admin/appointments/${appointment.id}`, {
         method: 'PATCH',
-        headers,
-        body: JSON.stringify({ status }),
+        token,
+        body: { status },
       });
-      if (!r.ok) throw Error();
-      SA(x => x.map(a => (a.id === id ? { ...a, status } : a)));
-      SN(status === 'CONFIRMED' ? 'Cita aceptada' : 'Cita rechazada');
-    } catch {
-      SN('No se pudo actualizar la cita');
+      SA(x => x.map(a => (a.id === appointment.id ? { ...a, ...updated } : a)));
+      SN(status === 'CONFIRMED' ? 'Cita confirmada' : 'Cita cancelada');
+    } catch (error) {
+      fail(error, 'No se pudo actualizar la cita');
     }
+  }
+  async function resetPassword(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const data = Object.fromEntries(new FormData(e.currentTarget));
+    try {
+      SReset(await apiFetch('/api/admin/users/reset-password', { method: 'POST', token, body: { email: data.email } }));
+    } catch (error) {
+      fail(error, 'No se pudo generar la clave temporal');
+    }
+  }
+  async function changeOwnPassword(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const data = Object.fromEntries(new FormData(e.currentTarget)) as Record<string, string>;
+    if (data.newPassword !== data.confirmPassword) return SN('La nueva contraseña y su confirmación no coinciden.');
+    try {
+      await apiFetch('/api/auth/password', {
+        method: 'POST',
+        token,
+        body: { currentPassword: data.currentPassword, newPassword: data.newPassword },
+      });
+      // El cambio cierra todas las sesiones; se vuelve a entrar con la clave nueva.
+      onSessionExpired('Contraseña actualizada. Inicia sesión con la nueva.');
+    } catch (error) {
+      fail(error, 'No se pudo cambiar la contraseña');
+    }
+  }
+  function itemPayload(form: HTMLFormElement) {
+    const d = Object.fromEntries(new FormData(form)),
+      vehicleMake = String(d.vehicleMake || '').trim(),
+      vehicleModel = String(d.vehicleModel || '').trim();
+    return {
+      sku: String(d.sku).trim(),
+      name: String(d.name).trim(),
+      category: String(d.category).trim(),
+      productBrand: String(d.productBrand || '').trim() || null,
+      productModel: String(d.productModel || '').trim() || null,
+      vehicleMake: vehicleMake || null,
+      vehicleModel: vehicleModel || null,
+      // Vacía = artículo de uso general (el servidor lo acepta al crear y al editar).
+      compatibility: [vehicleMake, vehicleModel].filter(Boolean).join(' '),
+      tireSize: String(d.tireSize || '').trim() || null,
+      priceCents: toCents(d.priceCents),
+      stock: Number(d.stock),
+      active: d.active === undefined ? true : d.active === 'on',
+    };
   }
   async function addItem(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const d = Object.fromEntries(new FormData(e.currentTarget)),
-      vehicleMake = String(d.vehicleMake || '').trim(),
-      vehicleModel = String(d.vehicleModel || '').trim(),
-      item = {
-        id: 'new-' + Date.now(),
-        sku: String(d.sku).trim(),
-        name: String(d.name).trim(),
-        category: String(d.category).trim(),
-        productBrand: String(d.productBrand || '').trim() || null,
-        productModel: String(d.productModel || '').trim() || null,
-        vehicleMake: vehicleMake || null,
-        vehicleModel: vehicleModel || null,
-        priceCents: toCents(d.priceCents),
-        stock: Number(d.stock),
-        compatibility: [vehicleMake, vehicleModel].filter(Boolean).join(' '),
-        tireSize: String(d.tireSize || '').trim() || null,
-        active: true,
-      };
-    if (fallback) {
-      SI(x => [item, ...x]);
-      SM(false);
-      SN('Artículo agregado al demo');
-      return;
-    }
     try {
-      const r = await fetch('/api/admin/inventory', { method: 'POST', headers, body: JSON.stringify(item) }),
-        saved = await r.json();
-      if (!r.ok) throw Error(saved.error);
+      const saved = await apiFetch<Item>('/api/admin/inventory', {
+        method: 'POST',
+        token,
+        body: { ...itemPayload(e.currentTarget), active: true },
+      });
       SI(x => [saved, ...x]);
       SM(false);
       SN('Artículo agregado');
-    } catch (err) {
-      SN(err instanceof Error ? err.message : 'No se pudo agregar el artículo');
+    } catch (error) {
+      fail(error, 'No se pudo agregar el artículo');
     }
   }
-  async function saveItem(e: React.FormEvent<HTMLFormElement>, id: string) {
+  async function saveItem(e: React.FormEvent<HTMLFormElement>, item: Item) {
     e.preventDefault();
-    const d = Object.fromEntries(new FormData(e.currentTarget)),
-      vehicleMake = String(d.vehicleMake || '').trim(),
-      vehicleModel = String(d.vehicleModel || '').trim(),
-      data = {
-        sku: String(d.sku).trim(),
-        name: String(d.name).trim(),
-        category: String(d.category).trim(),
-        productBrand: String(d.productBrand || '').trim() || null,
-        productModel: String(d.productModel || '').trim() || null,
-        vehicleMake: vehicleMake || null,
-        vehicleModel: vehicleModel || null,
-        compatibility:
-          [vehicleMake, vehicleModel].filter(Boolean).join(' ') || items.find(i => i.id === id)?.compatibility || '',
-        tireSize: String(d.tireSize || '').trim() || null,
-        priceCents: toCents(d.priceCents),
-        stock: Number(d.stock),
-        active: d.active === 'on',
-      };
-    if (fallback) {
-      SI(x => x.map(i => (i.id === id ? { ...i, ...data } : i)));
-      EI(null);
-      SN('Artículo actualizado en demo');
-      return;
-    }
+    const data = itemPayload(e.currentTarget);
+    // Conserva la compatibilidad antigua (texto libre) si no se cargó marca/modelo de vehículo.
+    if (!data.compatibility) data.compatibility = item.vehicleMake || item.vehicleModel ? '' : item.compatibility || '';
     try {
-      const r = await fetch('/api/admin/inventory/' + id, { method: 'PATCH', headers, body: JSON.stringify(data) }),
-        saved = await r.json();
-      if (!r.ok) throw Error(saved.error);
-      SI(x => x.map(i => (i.id === id ? saved : i)));
+      const saved = await apiFetch<Item>('/api/admin/inventory/' + item.id, { method: 'PATCH', token, body: data });
+      SI(x => x.map(i => (i.id === item.id ? saved : i)));
       EI(null);
       SN('Artículo actualizado');
-    } catch (err) {
-      SN(err instanceof Error ? err.message : 'No se pudo guardar el artículo');
+    } catch (error) {
+      fail(error, 'No se pudo guardar el artículo');
     }
   }
   async function toggleItem(item: Item) {
     const active = !item.active;
-    if (fallback) {
-      SI(x => x.map(i => (i.id === item.id ? { ...i, active } : i)));
-      SN(active ? 'Artículo activado en la web demo' : 'Artículo inactivado en la web demo');
-      return;
-    }
     try {
-      const r = await fetch('/api/admin/inventory/' + item.id, {
-          method: 'PATCH',
-          headers,
-          body: JSON.stringify({ active }),
-        }),
-        saved = await r.json();
-      if (!r.ok) throw Error(saved.error);
+      const saved = await apiFetch<Item>('/api/admin/inventory/' + item.id, {
+        method: 'PATCH',
+        token,
+        body: { active },
+      });
       SI(x => x.map(i => (i.id === item.id ? saved : i)));
-      SN(active ? 'Artículo activado en la web' : 'Artículo inactivado en la web');
-    } catch (err) {
-      SN(err instanceof Error ? err.message : 'No se pudo cambiar la visibilidad');
+      SN(active ? 'Artículo visible en la web' : 'Artículo oculto en la web');
+    } catch (error) {
+      fail(error, 'No se pudo cambiar la visibilidad');
     }
   }
-  async function serviceFormData(form: HTMLFormElement) {
+  function serviceFormData(form: HTMLFormElement) {
     const d = Object.fromEntries(new FormData(form));
     const file = d.image as File;
     return {
@@ -386,76 +224,92 @@ export default function AdminPanel({
         durationMin: Number(d.durationMin),
         priceCents: toCents(d.priceCents),
         active: d.active === 'on',
-        imageUrl: String(d.imageUrl || '') || null,
       },
       file: file && file.size ? file : null,
     };
   }
-  async function persistServiceImage(id: string, file: File | null, data: Record<string, unknown>) {
-    if (!file) return data;
-    if (file.size > 200 * 1024) throw new Error('La foto debe pesar como máximo 200 KB.');
-    const upload = await fetch('/api/admin/services/' + id + '/image', {
-        method: 'POST',
-        headers: { Authorization: 'Bearer ' + token, 'Content-Type': file.type },
-        body: file,
-      }),
-      result = await upload.json();
-    if (!upload.ok) throw Error(result.error || 'No se pudo cargar la imagen');
-    const update = await fetch('/api/admin/services/' + id, {
-        method: 'PATCH',
-        headers,
-        body: JSON.stringify({ imageUrl: result.imageUrl }),
-      }),
-      saved = await update.json();
-    if (!update.ok) throw Error(saved.error || 'No se pudo vincular la imagen');
-    return { ...data, ...saved };
+  /** Sube la foto ya optimizada y la vincula al servicio. */
+  async function persistServiceImage(saved: Service, file: File | null): Promise<Service> {
+    if (!file) return saved;
+    const optimized = await optimizeImage(file);
+    const upload = await apiFetch<{ imageUrl: string }>('/api/admin/services/' + saved.id + '/image', {
+      method: 'POST',
+      token,
+      raw: optimized,
+    });
+    return apiFetch<Service>('/api/admin/services/' + saved.id, {
+      method: 'PATCH',
+      token,
+      body: { imageUrl: upload.imageUrl },
+    });
   }
-  async function saveService(e: React.FormEvent<HTMLFormElement>, id: string) {
+  async function submitService(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const form = await serviceFormData(e.currentTarget),
-      data = form.data;
-    if (fallback) {
-      SS(x => x.map(s => (s.id === id ? { ...s, ...data } : s)));
-      SE(null);
-      SN('Servicio actualizado en demo');
-      return;
-    }
+    if (!serviceEditor) return;
+    const form = serviceFormData(e.currentTarget);
+    SSaving(true);
+    let saved: Service | null = null;
     try {
-      const r = await fetch('/api/admin/services/' + id, { method: 'PATCH', headers, body: JSON.stringify(data) });
-      let saved = await r.json();
-      if (!r.ok) throw Error(saved.error);
-      saved = await persistServiceImage(id, form.file, saved);
-      SS(x => x.map(s => (s.id === id ? saved : s)));
+      saved =
+        serviceEditor === 'create'
+          ? await apiFetch<Service>('/api/admin/services', { method: 'POST', token, body: form.data })
+          : await apiFetch<Service>('/api/admin/services/' + serviceEditor.id, {
+              method: 'PATCH',
+              token,
+              body: form.data,
+            });
+      const withImage = await persistServiceImage(saved, form.file);
+      SS(x =>
+        (x.some(s => s.id === withImage.id)
+          ? x.map(s => (s.id === withImage.id ? withImage : s))
+          : [...x, withImage]
+        ).sort((a, b) => a.category.localeCompare(b.category, 'es') || a.name.localeCompare(b.name, 'es')),
+      );
       SE(null);
-      SN('Servicio actualizado');
-    } catch (err) {
-      SN(err instanceof Error ? err.message : 'No se pudo guardar el servicio');
+      SN(serviceEditor === 'create' ? 'Servicio creado' : 'Servicio actualizado');
+    } catch (error) {
+      if (saved && !(error instanceof SessionExpiredError)) {
+        // Los datos quedaron guardados; sólo falló la foto.
+        const stored = saved;
+        SS(x => (x.some(s => s.id === stored.id) ? x.map(s => (s.id === stored.id ? stored : s)) : [...x, stored]));
+        SE(null);
+        SN(`Servicio guardado, pero la foto no se subió: ${errorText(error, 'error desconocido')}`);
+      } else fail(error, 'No se pudo guardar el servicio');
+    } finally {
+      SSaving(false);
     }
   }
-  async function createService(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const form = await serviceFormData(e.currentTarget),
-      data = form.data;
-    if (fallback) {
-      SS(x => [{ ...data, id: 'demo-service-' + Date.now() }, ...x]);
-      SE(null);
-      SN('Servicio creado en demo');
-      return;
-    }
-    try {
-      const r = await fetch('/api/admin/services', { method: 'POST', headers, body: JSON.stringify(data) });
-      let saved = await r.json();
-      if (!r.ok) throw Error(saved.error);
-      saved = await persistServiceImage(saved.id, form.file, saved);
-      SS(x => [...x, saved].sort((a, b) => a.category.localeCompare(b.category, 'es')));
-      SE(null);
-      SN('Servicio creado');
-    } catch (err) {
-      SN(err instanceof Error ? err.message : 'No se pudo crear el servicio');
-    }
-  }
-  const pending = appts.filter(a => a.status === 'PENDING').length,
-    low = items.filter(i => i.stock <= 4).length;
+
+  const now = Date.now();
+  const today = caracasDay(new Date());
+  const future = (a: Appt) => new Date(a.startsAt).getTime() >= now;
+  const pending = appts.filter(a => a.status === 'PENDING' && future(a)).length;
+  const low = items.filter(i => i.stock <= 4).length;
+  const shown = appts.filter(a =>
+    filter === 'pending'
+      ? a.status === 'PENDING' && future(a)
+      : filter === 'upcoming'
+        ? future(a) && a.status !== 'CANCELLED'
+        : true,
+  );
+  const visibleItems = items.filter(i =>
+    [
+      i.name,
+      i.sku,
+      i.productBrand,
+      i.productModel,
+      i.vehicleMake,
+      i.vehicleModel,
+      i.category,
+      i.compatibility,
+      i.tireSize,
+    ].some(value =>
+      String(value || '')
+        .toLocaleLowerCase('es')
+        .includes(query.toLocaleLowerCase('es')),
+    ),
+  );
+
   return (
     <div className="adminApp">
       <aside className="adminSide">
@@ -479,6 +333,9 @@ export default function AdminPanel({
               Panel protegido<small>Acceso administrador</small>
             </span>
           </div>
+          <button onClick={() => SAccount('password')}>
+            <KeyRound size={16} /> Cambiar mi contraseña
+          </button>
           <button onClick={onLogout}>
             <LogOut size={16} /> Cerrar sesión
           </button>
@@ -492,7 +349,7 @@ export default function AdminPanel({
           </div>
           <div className="adminTopRight">
             <span className="adminLive">
-              <i /> {fallback ? 'MODO DEMO' : 'SISTEMA ACTIVO'}
+              <i /> SISTEMA ACTIVO
             </span>
             <span className="adminAvatar">PT</span>
           </div>
@@ -503,9 +360,20 @@ export default function AdminPanel({
               <b>Centro de operaciones</b>
               <p>Gestiona la atención y mantén el catálogo al día.</p>
             </div>
-            <button className="adminRefresh" onClick={() => location.reload()}>
-              <RefreshCw size={15} /> Actualizar
-            </button>
+            <div className="adminWelcomeActions">
+              <button
+                className="adminRefresh"
+                onClick={() => {
+                  SReset(null);
+                  SAccount('reset');
+                }}
+              >
+                <UserRoundCog size={15} /> Clave temporal de cliente
+              </button>
+              <button className="adminRefresh" onClick={() => SVersion(v => v + 1)}>
+                <RefreshCw size={15} /> Actualizar
+              </button>
+            </div>
           </div>
           <div className="adminMetrics">
             <article>
@@ -520,12 +388,14 @@ export default function AdminPanel({
             </article>
             <article>
               <div className="metricIcon green">
-                <CalendarDaysIcon />
+                <CalendarDays />
               </div>
               <div>
                 <small>CITAS DE HOY</small>
-                <b>{appts.filter(a => caracasDay(new Date(a.startsAt)) === caracasDay(new Date())).length}</b>
-                <span>En agenda</span>
+                <b>
+                  {appts.filter(a => a.status !== 'CANCELLED' && caracasDay(new Date(a.startsAt)) === today).length}
+                </b>
+                <span>Pendientes y confirmadas</span>
               </div>
             </article>
             <article>
@@ -543,9 +413,9 @@ export default function AdminPanel({
                 <Users />
               </div>
               <div>
-                <small>CITAS REGISTRADAS</small>
+                <small>CITAS EN LISTA</small>
                 <b>{appts.length}</b>
-                <span>Todos los estados</span>
+                <span>Últimos 30 días y futuras</span>
               </div>
             </article>
           </div>
@@ -557,11 +427,14 @@ export default function AdminPanel({
                   <h2>Solicitudes de cita</h2>
                 </div>
                 <div className="adminFilters">
-                  <button className="filterActive">
-                    Todas <b>{appts.length}</b>
+                  <button className={filter === 'upcoming' ? 'filterActive' : ''} onClick={() => SFilter('upcoming')}>
+                    Próximas <b>{appts.filter(a => future(a) && a.status !== 'CANCELLED').length}</b>
                   </button>
-                  <button>
+                  <button className={filter === 'pending' ? 'filterActive' : ''} onClick={() => SFilter('pending')}>
                     Pendientes <b>{pending}</b>
+                  </button>
+                  <button className={filter === 'all' ? 'filterActive' : ''} onClick={() => SFilter('all')}>
+                    Todas <b>{appts.length}</b>
                   </button>
                 </div>
               </div>
@@ -578,7 +451,7 @@ export default function AdminPanel({
                     </tr>
                   </thead>
                   <tbody>
-                    {appts.map(a => (
+                    {shown.map(a => (
                       <tr key={a.id}>
                         <td>
                           <b>{a.user.name}</b>
@@ -594,6 +467,7 @@ export default function AdminPanel({
                         </td>
                         <td>
                           {new Date(a.startsAt).toLocaleDateString('es-VE', {
+                            weekday: 'short',
                             day: '2-digit',
                             month: 'short',
                             timeZone: 'America/Caracas',
@@ -610,31 +484,40 @@ export default function AdminPanel({
                         <td>
                           <div className="appointmentActions">
                             <span className={'statusTag ' + a.status.toLowerCase()}>
-                              {a.status === 'PENDING'
-                                ? 'Pendiente'
-                                : a.status === 'CONFIRMED'
-                                  ? 'Aceptada'
-                                  : 'Rechazada'}
+                              {STATUS_LABEL[a.status] || a.status}
                             </span>
                             {a.status === 'PENDING' && (
                               <>
                                 <button
                                   type="button"
                                   className="acceptBtn"
-                                  onClick={() => changeStatus(a.id, 'CONFIRMED')}
-                                  title="Aceptar cita"
+                                  onClick={() => changeStatus(a, 'CONFIRMED')}
+                                  title="Confirmar cita"
+                                  aria-label="Confirmar cita"
                                 >
                                   <Check size={15} />
                                 </button>
                                 <button
                                   type="button"
                                   className="rejectBtn"
-                                  onClick={() => changeStatus(a.id, 'CANCELLED')}
+                                  onClick={() => changeStatus(a, 'CANCELLED')}
                                   title="Rechazar cita"
+                                  aria-label="Rechazar cita"
                                 >
                                   <X size={15} />
                                 </button>
                               </>
+                            )}
+                            {a.status === 'CONFIRMED' && future(a) && (
+                              <button
+                                type="button"
+                                className="rejectBtn"
+                                onClick={() => changeStatus(a, 'CANCELLED')}
+                                title="Cancelar cita confirmada"
+                                aria-label="Cancelar cita confirmada"
+                              >
+                                <X size={15} />
+                              </button>
                             )}
                           </div>
                         </td>
@@ -642,7 +525,11 @@ export default function AdminPanel({
                     ))}
                   </tbody>
                 </table>
-                {!appts.length && <div className="adminEmpty">No hay citas todavía.</div>}
+                {!shown.length && (
+                  <div className="adminEmpty">
+                    {appts.length ? 'No hay citas con este filtro.' : 'No hay citas todavía.'}
+                  </div>
+                )}
               </div>
             </section>
           )}
@@ -667,92 +554,54 @@ export default function AdminPanel({
                   />
                 </div>
                 <span>
-                  {
-                    items.filter(i =>
-                      [
-                        i.name,
-                        i.sku,
-                        i.productBrand,
-                        i.productModel,
-                        i.vehicleMake,
-                        i.vehicleModel,
-                        i.category,
-                        i.compatibility,
-                        i.tireSize,
-                      ].some(value =>
-                        String(value || '')
-                          .toLocaleLowerCase('es')
-                          .includes(query.toLocaleLowerCase('es')),
-                      ),
-                    ).length
-                  }{' '}
-                  de {items.length} artículos
+                  {visibleItems.length} de {items.length} artículos
                 </span>
               </div>
               <div className="inventoryList">
-                {items
-                  .filter(i =>
-                    [
-                      i.name,
-                      i.sku,
-                      i.productBrand,
-                      i.productModel,
-                      i.vehicleMake,
-                      i.vehicleModel,
-                      i.category,
-                      i.compatibility,
-                      i.tireSize,
-                    ].some(value =>
-                      String(value || '')
-                        .toLocaleLowerCase('es')
-                        .includes(query.toLocaleLowerCase('es')),
-                    ),
-                  )
-                  .map(i => (
-                    <article className={'inventoryRow ' + (!i.active ? 'inventoryInactive' : '')} key={i.id}>
-                      <div className="inventoryItem">
-                        <div className="inventoryDisc">
-                          <Disc3 />
-                        </div>
-                        <div>
-                          <b>{i.name}</b>
-                          <small>
-                            {i.sku} · {i.category} {i.tireSize ? '· ' + i.tireSize : ''}
-                          </small>
-                          <small>
-                            Artículo:{' '}
-                            {[i.productBrand, i.productModel].filter(Boolean).join(' ') ||
-                              'Marca/modelo sin especificar'}
-                          </small>
-                          <small>
-                            Vehículos:{' '}
-                            {[i.vehicleMake, i.vehicleModel].filter(Boolean).join(' ') ||
-                              i.compatibility ||
-                              'Compatibilidad general'}
-                          </small>
-                        </div>
+                {visibleItems.map(i => (
+                  <article className={'inventoryRow ' + (!i.active ? 'inventoryInactive' : '')} key={i.id}>
+                    <div className="inventoryItem">
+                      <div className="inventoryDisc">
+                        <Disc3 />
                       </div>
-                      <div className="inventoryNumbers">
-                        <b>{cash(i.priceCents)}</b>
-                        <small>{i.stock} unidades</small>
+                      <div>
+                        <b>{i.name}</b>
+                        <small>
+                          {i.sku} · {i.category} {i.tireSize ? '· ' + i.tireSize : ''}
+                        </small>
+                        <small>
+                          Artículo:{' '}
+                          {[i.productBrand, i.productModel].filter(Boolean).join(' ') || 'Marca/modelo sin especificar'}
+                        </small>
+                        <small>
+                          Vehículos:{' '}
+                          {[i.vehicleMake, i.vehicleModel].filter(Boolean).join(' ') ||
+                            i.compatibility ||
+                            'Compatibilidad general'}
+                        </small>
                       </div>
-                      <span className={i.active ? 'inventoryVisibility visible' : 'inventoryVisibility hidden'}>
-                        {i.active ? 'Visible en web' : 'Oculto en web'}
-                      </span>
-                      <div className="inventoryActions">
-                        <button className="saveStock" type="button" onClick={() => EI(i)}>
-                          Editar
-                        </button>
-                        <button
-                          className={i.active ? 'inventoryToggle off' : 'inventoryToggle on'}
-                          type="button"
-                          onClick={() => toggleItem(i)}
-                        >
-                          {i.active ? 'Inactivar' : 'Activar'}
-                        </button>
-                      </div>
-                    </article>
-                  ))}
+                    </div>
+                    <div className="inventoryNumbers">
+                      <b>{cash(i.priceCents)}</b>
+                      <small>{i.stock} unidades</small>
+                    </div>
+                    <span className={i.active ? 'inventoryVisibility visible' : 'inventoryVisibility hidden'}>
+                      {i.active ? 'Visible en web' : 'Oculto en web'}
+                    </span>
+                    <div className="inventoryActions">
+                      <button className="saveStock" type="button" onClick={() => EI(i)}>
+                        Editar
+                      </button>
+                      <button
+                        className={i.active ? 'inventoryToggle off' : 'inventoryToggle on'}
+                        type="button"
+                        onClick={() => toggleItem(i)}
+                      >
+                        {i.active ? 'Inactivar' : 'Activar'}
+                      </button>
+                    </div>
+                  </article>
+                ))}
               </div>
               {!items.length && (
                 <div className="adminEmpty">Todavía no hay artículos. Carga el primero para comenzar.</div>
@@ -793,23 +642,97 @@ export default function AdminPanel({
             </section>
           )}
           <footer className="adminFooter">
-            Panel local de administración <span>Precios expresados en dólares estadounidenses (USD)</span>
+            Panel de administración <span>Precios expresados en dólares estadounidenses (USD)</span>
           </footer>
         </div>
       </main>
       {message && (
-        <div className="toast">
+        <div className="toast" role="status">
           <Check size={16} />
           {message}
-          <button onClick={() => SN('')}>
+          <button onClick={() => SN('')} aria-label="Cerrar aviso">
             <X size={15} />
           </button>
+        </div>
+      )}
+      {accountModal && (
+        <div className="overlay" onClick={() => SAccount('')}>
+          <form
+            className="modal adminModal"
+            onSubmit={accountModal === 'reset' ? resetPassword : changeOwnPassword}
+            onClick={e => e.stopPropagation()}
+          >
+            <button className="close" type="button" onClick={() => SAccount('')} aria-label="Cerrar">
+              <X />
+            </button>
+            {accountModal === 'reset' ? (
+              <>
+                <div className="eyebrow dark">
+                  <i /> ATENCIÓN AL CLIENTE
+                </div>
+                <h2>Clave temporal</h2>
+                <p className="modalHint">
+                  Úsala cuando un cliente llame porque olvidó su contraseña. Verifica su identidad antes de dársela; sus
+                  sesiones abiertas se cierran.
+                </p>
+                <input className="field" name="email" type="email" placeholder="Correo del cliente" required />
+                {resetResult && (
+                  <div className="tempPassword">
+                    <small>
+                      Clave temporal de {resetResult.name} ({resetResult.email}):
+                    </small>
+                    <b>{resetResult.temporaryPassword}</b>
+                    <small>Dísela por teléfono y pídele que la cambie en "Contraseña" al entrar.</small>
+                  </div>
+                )}
+                <button className="adminPrimary full">
+                  Generar clave temporal <ArrowUpRight size={16} />
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="eyebrow dark">
+                  <i /> TU CUENTA
+                </div>
+                <h2>Cambiar mi contraseña</h2>
+                <input
+                  className="field"
+                  name="currentPassword"
+                  type="password"
+                  placeholder="Contraseña actual"
+                  autoComplete="current-password"
+                  required
+                />
+                <input
+                  className="field"
+                  name="newPassword"
+                  type="password"
+                  minLength={14}
+                  placeholder="Nueva contraseña (14 caracteres o más)"
+                  autoComplete="new-password"
+                  required
+                />
+                <input
+                  className="field"
+                  name="confirmPassword"
+                  type="password"
+                  minLength={14}
+                  placeholder="Repite la nueva contraseña"
+                  autoComplete="new-password"
+                  required
+                />
+                <button className="adminPrimary full">
+                  Guardar contraseña <ArrowUpRight size={16} />
+                </button>
+              </>
+            )}
+          </form>
         </div>
       )}
       {modal && (
         <div className="overlay" onClick={() => SM(false)}>
           <form className="modal adminModal inventoryModal" onSubmit={addItem} onClick={e => e.stopPropagation()}>
-            <button className="close" type="button" onClick={() => SM(false)}>
+            <button className="close" type="button" onClick={() => SM(false)} aria-label="Cerrar">
               <X />
             </button>
             <div className="eyebrow dark">
@@ -852,10 +775,10 @@ export default function AdminPanel({
         <div className="overlay" onClick={() => EI(null)}>
           <form
             className="modal adminModal inventoryModal"
-            onSubmit={e => saveItem(e, itemEditor.id)}
+            onSubmit={e => saveItem(e, itemEditor)}
             onClick={e => e.stopPropagation()}
           >
-            <button className="close" type="button" onClick={() => EI(null)}>
+            <button className="close" type="button" onClick={() => EI(null)} aria-label="Cerrar">
               <X />
             </button>
             <div className="eyebrow dark">
@@ -934,6 +857,7 @@ export default function AdminPanel({
               placeholder="Medida del caucho (opcional)"
               defaultValue={itemEditor.tireSize || ''}
             />
+            <input type="hidden" name="active" value="off" />
             <label className="inventoryModalToggle">
               <input name="active" type="checkbox" defaultChecked={itemEditor.active} /> Artículo visible en la web
             </label>
@@ -944,13 +868,9 @@ export default function AdminPanel({
         </div>
       )}
       {serviceEditor && (
-        <div className="overlay" onClick={() => SE(null)}>
-          <form
-            className="modal adminModal serviceModal"
-            onSubmit={serviceEditor === 'create' ? createService : e => saveService(e, serviceEditor.id)}
-            onClick={e => e.stopPropagation()}
-          >
-            <button className="close" type="button" onClick={() => SE(null)}>
+        <div className="overlay" onClick={() => !saving && SE(null)}>
+          <form className="modal adminModal serviceModal" onSubmit={submitService} onClick={e => e.stopPropagation()}>
+            <button className="close" type="button" onClick={() => SE(null)} aria-label="Cerrar" disabled={saving}>
               <X />
             </button>
             <div className="eyebrow dark">
@@ -978,6 +898,7 @@ export default function AdminPanel({
                 name="durationMin"
                 type="number"
                 min="5"
+                max="540"
                 step="5"
                 placeholder="Duración en minutos"
                 defaultValue={serviceEditor === 'create' ? '' : serviceEditor.durationMin}
@@ -993,17 +914,12 @@ export default function AdminPanel({
               required
             />
             <label className="serviceImageUpload">
-              Foto del servicio (JPG, PNG o WebP, máximo 200 KB)
+              Foto del servicio (JPG, PNG o WebP; se optimiza automáticamente)
               <input className="field" type="file" name="image" accept="image/jpeg,image/png,image/webp" />
             </label>
             {serviceEditor !== 'create' && serviceEditor.imageUrl && (
               <img className="serviceImagePreview" src={serviceEditor.imageUrl} alt="Foto actual del servicio" />
             )}
-            <input
-              type="hidden"
-              name="imageUrl"
-              value={serviceEditor === 'create' ? '' : serviceEditor.imageUrl || ''}
-            />
             <div className="twocol">
               <label className="servicePriceInput">
                 Precio estimado (USD)
@@ -1027,15 +943,13 @@ export default function AdminPanel({
                 Visible en el portal
               </label>
             </div>
-            <button className="adminPrimary full">
-              {serviceEditor === 'create' ? 'Crear servicio' : 'Guardar cambios'} <ArrowUpRight size={16} />
+            <button className="adminPrimary full" disabled={saving}>
+              {saving ? 'Guardando…' : serviceEditor === 'create' ? 'Crear servicio' : 'Guardar cambios'}{' '}
+              <ArrowUpRight size={16} />
             </button>
           </form>
         </div>
       )}
     </div>
   );
-}
-function CalendarDaysIcon() {
-  return <CalendarDays />;
 }

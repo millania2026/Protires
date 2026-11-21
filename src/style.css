@@ -115,7 +115,7 @@ select {
   inset: 0;
   background:
     linear-gradient(90deg, #101213f2 0%, #101213d9 39%, #10121330 100%),
-    url('/images/workshop-armada.png') center 54% / cover;
+    url('/images/workshop-armada.webp') center 54% / cover;
 }
 .heroContent {
   position: relative;
@@ -2372,4 +2372,77 @@ select {
   object-fit: cover;
   border-radius: 7px;
   border: 1px solid #e5e6e4;
+}
+
+/* --- Estados de cita, turnos y avisos (revisión de publicación) --- */
+.appointmentMeta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+}
+.appointmentRow.past {
+  opacity: 0.6;
+}
+.cancelLink {
+  border: 0;
+  background: none;
+  color: #be6653;
+  font-size: 9px;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+.panelSubhead {
+  margin-top: 14px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: #969d97;
+}
+.formHint {
+  display: block;
+  color: #a06c1c;
+  font-size: 12px;
+  margin: -2px 0 10px;
+}
+.modalHint {
+  display: block;
+  color: #6b716d;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 10px 0;
+  text-align: center;
+}
+.btn:disabled,
+.adminPrimary:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.field:disabled {
+  opacity: 0.6;
+}
+.adminWelcomeActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tempPassword {
+  display: grid;
+  gap: 6px;
+  background: #f3f7f1;
+  border: 1px dashed #9bb98d;
+  border-radius: 8px;
+  padding: 12px;
+  margin: 10px 0;
+  text-align: center;
+}
+.tempPassword b {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 20px;
+  letter-spacing: 0.04em;
+  user-select: all;
+}
+.tempPassword small {
+  color: #6b716d;
+  font-size: 12px;
 }

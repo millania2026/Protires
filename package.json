@@ -2,20 +2,27 @@
   "name": "torque-local",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "dev": "concurrently \"npm:api\" \"npm:web\"",
     "api": "tsx watch server/index.ts",
     "web": "vite --host 0.0.0.0",
-    "db:push": "prisma db push",
-    "db:services": "tsx prisma/protires-services.ts",
-    "db:migrate-service-images": "tsx prisma/migrate-service-images.ts",
     "build": "prisma generate && vite build && tsc -p tsconfig.server.json",
-    "db:create-admin": "tsx prisma/create-admin.ts",
+    "build:vercel": "prisma generate && prisma migrate deploy && vite build",
     "start": "node dist-server/server/index.js",
-    "db:backup": "tsx prisma/backup.ts"
+    "typecheck": "tsc --noEmit",
+    "db:migrate": "prisma migrate deploy",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:services": "tsx prisma/protires-services.ts",
+    "db:create-admin": "tsx prisma/create-admin.ts",
+    "db:backup": "tsx prisma/backup.ts",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@prisma/client": "^6.19.0",
+    "@vercel/blob": "2.8.2",
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",

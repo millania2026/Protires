@@ -1,85 +1,92 @@
-# Protires Services: preparación y publicación
+# Protires Services: publicación en Vercel
 
-Este repositorio es la única copia del proyecto para pruebas y publicación. No desplegar carpetas o paquetes antiguos.
+Este repositorio es la única copia del proyecto. Vercel publica cada push a `main` (producción) y cada rama o PR (vista previa).
 
-## Antes de publicar
+## Qué usa
 
-- Configura en el hosting `DATABASE_URL=file:/data/protires.db`, `DATABASE_BACKUP_DIR=/data/backups` y `PUBLIC_UPLOAD_DIR=/data/uploads` sobre un volumen persistente montado en `/data`.
-- `JWT_SECRET` y `ERP_WEBHOOK_KEY` deben ser dos secretos aleatorios distintos, de al menos 32 bytes. No uses `.env.example` ni subas `.env` al repositorio.
-- Configura `CORS_ORIGINS` con el dominio final exacto, `APPOINTMENT_CAPACITY` según las bahías disponibles y `TRUST_PROXY_HOPS=1` para Fly.io.
-- El plan usa una sola máquina y SQLite. No escales a réplicas: SQLite, las fotos y el volumen son locales a esa máquina.
-- Revisa los precios y duraciones de los 11 servicios desde el administrador. El catálogo de servicios inicial deja esos valores en cero hasta que el taller los confirme.
+| Pieza | Servicio | Variables que crea |
+|---|---|---|
+| Portal (Vite) y API (Express en `api/index.ts`) | Vercel | — |
+| Base de datos | Neon Postgres, desde el Marketplace de Vercel | `DATABASE_URL`, `DATABASE_URL_UNPOOLED` |
+| Fotos de servicios | Vercel Blob (acceso **público**) | `BLOB_READ_WRITE_TOKEN` |
 
-## Publicar con Fly.io
+> **Plan de Vercel:** el plan Hobby es sólo para uso personal y no comercial. Para la web de un taller usa el plan **Pro**.
 
-El proyecto incluye `Dockerfile`, `.dockerignore` y `fly.toml`. El archivo configura la región Miami, un volumen de 1 GB en `/data`, HTTPS, un chequeo de salud y una máquina de 512 MB. El nombre `protires` debe estar disponible en Fly.io; si no, cambia `app` en `fly.toml` antes de crear la aplicación.
+## Primera publicación
 
-1. Instala `flyctl` en Windows y autentícate con `fly auth signup` o `fly auth login`.
-2. Desde esta carpeta, crea la aplicación indicada en `fly.toml` y el volumen:
-
+1. En vercel.com: **Add New → Project → Import** `millania2026/Protires`. La configuración (Vite, build, carpeta `dist`, cabeceras de seguridad) ya viene en `vercel.json`. Si Vercel intenta un primer deploy antes del paso 3, **fallará el build: es normal**, todavía no hay base de datos.
+2. **Storage → Create Database → Neon** y conéctala al proyecto (Production y Preview). Elige la región **AWS us-east-1 (Washington)**, la misma de las funciones de Vercel. Crea `DATABASE_URL` y `DATABASE_URL_UNPOOLED`.
+   - Recomendado: en la integración de Neon activa **una rama por vista previa**, así las vistas previas no escriben en la base de producción.
+3. **Storage → Create → Blob**, con acceso público, y conéctalo al proyecto. Crea `BLOB_READ_WRITE_TOKEN`.
+4. **Settings → Environment Variables** (Production y Preview):
+   - `JWT_SECRET` y `ERP_WEBHOOK_KEY`: dos valores aleatorios **distintos**. Genera cada uno en PowerShell con:
+     ```powershell
+     node -p "require('crypto').randomBytes(48).toString('hex')"
+     ```
+   - `APPOINTMENT_CAPACITY`: citas simultáneas que admite el taller (bahías). Por defecto 1.
+   - `TRUST_PROXY_HOPS`: `1`.
+   - `CORS_ORIGINS`: déjala vacía. El propio portal, `www`/sin `www`, el dominio propio y las vistas previas ya están permitidos; sólo se usa si otro sitio distinto debe llamar a la API.
+5. **Deployments → Redeploy**, o haz un push a `main`. El build ejecuta `prisma migrate deploy` y crea las tablas.
+6. Carga el catálogo y crea el administrador **una sola vez** desde tu PC, apuntando a la base de producción. Copia de Vercel el valor de `DATABASE_URL_UNPOOLED` y, en la carpeta del proyecto:
    ```powershell
-   fly apps create protires
-   fly volumes create protires_data --region mia --size 1
+   npm ci
+   $env:DATABASE_URL = "<pega aquí DATABASE_URL_UNPOOLED>"
+   $env:DATABASE_URL_UNPOOLED = $env:DATABASE_URL
+   npm run db:services
+   $env:ADMIN_EMAIL = "correo-del-taller@dominio.com"
+   $env:ADMIN_PASSWORD = "<contraseña única de 14 caracteres o más>"
+   npm run db:create-admin
+   Remove-Item Env:ADMIN_EMAIL, Env:ADMIN_PASSWORD, Env:DATABASE_URL, Env:DATABASE_URL_UNPOOLED
    ```
+   `db:services` se puede repetir sin riesgo: sólo crea los servicios que falten y no toca precios, fotos ni servicios creados desde el panel.
+7. Comprueba lo que indica `PRUEBAS-RELEASE.md` (salud, registro, reserva, confirmación, foto y ERP).
+8. Dominio propio: **Settings → Domains**. No hace falta cambiar CORS ni volver a desplegar.
 
-3. Genera secretos localmente y cárgalos sin ponerlos en el código:
+## Cambios en la base de datos
 
-   ```powershell
-   $jwtSecret = node -p "require('crypto').randomBytes(48).toString('hex')"
-   $erpKey = node -p "require('crypto').randomBytes(48).toString('hex')"
-   fly secrets set "JWT_SECRET=$jwtSecret" "ERP_WEBHOOK_KEY=$erpKey" "CORS_ORIGINS=https://protires.fly.dev"
-   Remove-Variable jwtSecret,erpKey
-   ```
+1. Edita `prisma/schema.prisma`.
+2. Contra una base de desarrollo (por ejemplo, una rama de Neon), ejecuta `npm run db:migrate:dev -- --name descripcion-del-cambio`.
+3. Haz commit de la carpeta `prisma/migrations`. El próximo deploy la aplica sola.
 
-   Si usas un dominio propio, configura aquí el origen HTTPS final. Guarda `ERP_WEBHOOK_KEY` también en el sistema ERP, solo del lado servidor.
+## Respaldos
 
-4. Publica la aplicación:
+- **Neon** guarda el historial y permite restaurar a un punto en el tiempo; la ventana depende del plan. Prueba una restauración antes de abrir al público.
+- `npm run db:backup` exporta toda la base a un JSON en `DATABASE_BACKUP_DIR` (por defecto `./backups`). Contiene correos y hashes de contraseñas: guárdalo en un lugar privado y fuera del repositorio.
+- Las fotos viven en Vercel Blob y no se borran con la base. Cuando se reemplaza la foto de un servicio, el panel borra la anterior.
 
-   ```powershell
-   fly deploy
-   ```
+## Operación diaria
 
-5. Inicializa la base y el catálogo una sola vez sobre el volumen persistente:
+- **Cliente que olvidó su contraseña:** llama al taller. En el panel, **Clave temporal de cliente** genera una clave y cierra sus sesiones. Verifica su identidad antes de dársela; al entrar, el cliente la cambia en **Contraseña**.
+- **Contraseña del administrador:** panel → **Cambiar mi contraseña**.
+- **Citas:** el cliente envía una solicitud (pendiente) y el taller la confirma o la rechaza; una confirmada se puede cancelar después. El cliente puede cancelar las suyas desde su panel. Una cita cancelada no se reactiva: su cupo queda libre para otro cliente.
+- **Horario:** lunes a sábado, de 8:30 a. m. a 5:30 p. m. (Caracas), turnos cada 30 minutos y hasta 90 días de anticipación. Estas reglas viven en `server/schedule.ts`.
+- **Límites contra abuso** (compartidos entre todas las instancias, en la tabla `RateLimit`):
+  - Login: 8 fallos por correo y conexión cada 15 minutos (sólo cuentan los fallos) y 100 intentos por conexión cada 15 minutos.
+  - Registro: 20 cuentas por conexión cada hora.
+  - Reservas: 15 por conexión al día y 2 pendientes por cliente. Un horario mal elegido no cuenta.
 
-   ```powershell
-   fly ssh console -C "npm run db:backup"
-   fly ssh console -C "npx prisma db push --skip-generate"
-   fly ssh console -C "npm run db:migrate-service-images"
-   fly ssh console -C "npm run db:services"
-   ```
-
-6. Crea el primer administrador con un correo del taller y una contraseña única de al menos 14 caracteres. Para ello, establece `ADMIN_EMAIL` y `ADMIN_PASSWORD` temporalmente como secretos de Fly, ejecuta `fly ssh console -C "npm run db:create-admin"` y quita inmediatamente esas dos variables con `fly secrets unset ADMIN_EMAIL ADMIN_PASSWORD`. El script elimina el acceso de las cuentas demo heredadas e invalida sus sesiones. No reutilices una contraseña personal.
-7. Comprueba `/api/health`, crea un cliente real de prueba, registra vehículo, reserva una cita, acepta la cita desde el administrador y confirma que una petición ERP sin `x-erp-key` devuelve 401.
-8. Añade el dominio propio y DNS cuando el cliente lo tenga. Después actualiza `CORS_ORIGINS` al dominio final y repite la prueba.
-
-No ejecutes `db:services` cada vez que inicia el servidor: es una inicialización que vuelve a publicar el catálogo. Los servicios nuevos y sus fotos se gestionan desde la administración.
-
-## Instalación local
+## Desarrollo local
 
 ```powershell
 npm ci
 Copy-Item .env.example .env
-npx prisma db push
+```
+
+En `.env`, completa `DATABASE_URL` y `DATABASE_URL_UNPOOLED` (una rama de desarrollo de Neon o un Postgres propio) y los dos secretos. Después:
+
+```powershell
+npm run db:migrate
 npm run db:services
 npm run dev
 ```
 
-Completa `JWT_SECRET` y `ERP_WEBHOOK_KEY` en `.env` con valores distintos antes de iniciar la API. En local el frontend queda en `http://localhost:5173` y el API en `http://localhost:4000`.
+El portal queda en `http://localhost:5173` y la API en `http://localhost:4000`. Sin `BLOB_READ_WRITE_TOKEN`, las fotos se guardan en `./uploads`.
 
-## Citas e imágenes
+## Lo que depende del cliente
 
-La API limita las solicitudes, valida campos antes de escribirlos y admite como máximo dos citas pendientes futuras por usuario. `APPOINTMENT_CAPACITY` controla las citas simultáneas permitidas; el valor inicial es una bahía. Se rechazan domingos y servicios que excedan el horario del taller en Caracas.
-
-Las fotos se aceptan como JPG, PNG o WebP de hasta 200 KB, se guardan en `/data/uploads` y la base almacena únicamente su ruta. Ejecuta `db:migrate-service-images` una vez en bases que ya tengan fotos antiguas: convierte las imágenes base64 válidas de hasta 200 KB y elimina imágenes ajenas, inválidas o demasiado grandes, que se pueden volver a cargar optimizadas desde el administrador. La API pública tampoco entrega fotos base64. Las imágenes de respaldo del catálogo son locales; agrega fotos propias desde el administrador para personalizar cada servicio.
-
-## Respaldos
-
-`npm run db:backup` crea una copia SQLite consistente y valida integridad y conteos. Configura además una copia diaria fuera del volumen y del proveedor; prueba una restauración antes de abrir al público. Las fotos del directorio `/data/uploads` también deben copiarse junto con la base, ya que las rutas de servicio apuntan a esos archivos.
-
-## Elementos que dependen del cliente/hosting
-
-- Cuenta de Fly.io y medio de pago, dominio y acceso a su DNS.
-- Dirección de correo administrativa y contraseña exclusiva.
-- Precios, duraciones, capacidad real del taller y autorización de la clave ERP.
-- Destino externo para respaldos y procedimiento de restauración.
-- Aviso de privacidad y términos para el tratamiento de nombres, correos y placas.
+- Cuenta de Vercel (plan Pro), dominio y acceso a su DNS.
+- Correo administrativo y contraseña exclusiva.
+- Precios, duraciones y capacidad real del taller. El catálogo inicial deja precio 0 ("precio por consultar") y 30 minutos.
+- Confirmar las cifras de la portada ("12+ años", "4.9★", "2.4k vehículos") o quitarlas.
+- Aviso de privacidad y términos para nombres, correos y placas.
+- Autorizar la clave ERP y guardarla sólo del lado del servidor del ERP.

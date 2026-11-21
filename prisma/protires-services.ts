@@ -1,5 +1,8 @@
+import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 
+// Carga inicial del catálogo. Es segura de repetir: sólo crea los servicios que faltan
+// y no toca precios, duraciones, fotos ni servicios creados desde la administración.
 const db = new PrismaClient();
 const services = [
   {
@@ -57,26 +60,23 @@ const services = [
 ];
 
 try {
+  let created = 0;
   await db.$transaction(async tx => {
-    await tx.service.updateMany({
-      where: { name: { notIn: services.map(service => service.name) } },
-      data: { active: false },
-    });
+    // Nombres de una versión anterior del catálogo.
     await tx.service.updateMany({
       where: { name: { in: ['Alineación y balanceo', 'Revisión de frenos'] } },
       data: { active: false },
     });
     for (const service of services) {
-      const existing = await tx.service.findFirst({ where: { name: service.name } });
-      if (existing) {
-        await tx.service.update({ where: { id: existing.id }, data: { ...service, active: true } });
-      } else {
-        await tx.service.create({ data: { ...service, durationMin: 30, priceCents: 0, active: true } });
-      }
+      const existing = await tx.service.findFirst({ where: { name: service.name }, select: { id: true } });
+      if (existing) continue;
+      await tx.service.create({ data: { ...service, durationMin: 30, priceCents: 0, active: true } });
+      created += 1;
     }
   });
   console.log(
-    `Catálogo Protires actualizado: ${services.length} servicios activos. Asigna duración y precios desde administración.`,
+    `Catálogo Protires: ${created} servicios nuevos (${services.length - created} ya existían). ` +
+      'Asigna duración y precios desde administración.',
   );
 } finally {
   await db.$disconnect();
